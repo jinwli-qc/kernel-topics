@@ -739,7 +739,7 @@ nouveau_drm_device_new(const struct drm_driver *drm_driver, struct device *paren
 	struct nouveau_drm *drm;
 	int ret;
 
-	drm = kzalloc(sizeof(*drm), GFP_KERNEL);
+	drm = kzalloc_obj(*drm);
 	if (!drm)
 		return ERR_PTR(-ENOMEM);
 
@@ -983,7 +983,7 @@ nouveau_do_suspend(struct nouveau_drm *drm, bool runtime)
 	}
 
 	NV_DEBUG(drm, "suspending object tree...\n");
-	ret = nvif_client_suspend(&drm->_client);
+	ret = nvif_client_suspend(&drm->_client, runtime);
 	if (ret)
 		goto fail_client;
 
@@ -1203,7 +1203,7 @@ nouveau_drm_open(struct drm_device *dev, struct drm_file *fpriv)
 		 current->comm, pid_nr(rcu_dereference(fpriv->pid)));
 	rcu_read_unlock();
 
-	if (!(cli = kzalloc(sizeof(*cli), GFP_KERNEL))) {
+	if (!(cli = kzalloc_obj(*cli))) {
 		ret = -ENOMEM;
 		goto done;
 	}
@@ -1284,9 +1284,6 @@ nouveau_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(NOUVEAU_EXEC, nouveau_exec_ioctl_exec, DRM_RENDER_ALLOW),
 };
 
-#define DRM_IOCTL_NOUVEAU_NVIF _IOC(_IOC_READ | _IOC_WRITE, DRM_IOCTL_BASE, \
-				    DRM_COMMAND_BASE + DRM_NOUVEAU_NVIF, 0)
-
 long
 nouveau_drm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
@@ -1300,10 +1297,14 @@ nouveau_drm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		return ret;
 	}
 
-	if ((cmd & ~IOCSIZE_MASK) == DRM_IOCTL_NOUVEAU_NVIF)
+	switch (_IOC_NR(cmd) - DRM_COMMAND_BASE) {
+	case DRM_NOUVEAU_NVIF:
 		ret = nouveau_abi16_ioctl(filp, (void __user *)arg, _IOC_SIZE(cmd));
-	else
+		break;
+	default:
 		ret = drm_ioctl(file, cmd, arg);
+		break;
+	}
 
 	pm_runtime_mark_last_busy(dev->dev);
 	pm_runtime_put_autosuspend(dev->dev);

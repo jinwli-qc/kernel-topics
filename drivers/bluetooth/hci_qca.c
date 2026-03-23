@@ -87,6 +87,7 @@ enum qca_flags {
 enum qca_capabilities {
 	QCA_CAP_WIDEBAND_SPEECH = BIT(0),
 	QCA_CAP_VALID_LE_STATES = BIT(1),
+	QCA_CAP_HFP_HW_OFFLOAD  = BIT(2),
 };
 
 /* HCI_IBS transmit side sleep protocol states */
@@ -229,6 +230,7 @@ struct qca_serdev {
 	u32 init_speed;
 	u32 oper_speed;
 	bool bdaddr_property_broken;
+	bool support_hfp_hw_offload;
 	const char *firmware_name[2];
 };
 
@@ -583,7 +585,7 @@ static int qca_open(struct hci_uart *hu)
 	if (!hci_uart_has_flow_control(hu))
 		return -EOPNOTSUPP;
 
-	qca = kzalloc(sizeof(*qca), GFP_KERNEL);
+	qca = kzalloc_obj(*qca);
 	if (!qca)
 		return -ENOMEM;
 
@@ -1055,7 +1057,7 @@ static void qca_controller_memdump(struct work_struct *work)
 		}
 
 		if (!qca_memdump) {
-			qca_memdump = kzalloc(sizeof(*qca_memdump), GFP_ATOMIC);
+			qca_memdump = kzalloc_obj(*qca_memdump, GFP_ATOMIC);
 			if (!qca_memdump) {
 				mutex_unlock(&qca->hci_memdump_lock);
 				return;
@@ -1264,6 +1266,7 @@ static const struct h4_recv_pkt qca_recv_pkts[] = {
 	{ H4_RECV_ACL,             .recv = qca_recv_acl_data },
 	{ H4_RECV_SCO,             .recv = hci_recv_frame    },
 	{ H4_RECV_EVENT,           .recv = qca_recv_event    },
+	{ H4_RECV_ISO,             .recv = hci_recv_frame    },
 	{ QCA_IBS_WAKE_IND_EVENT,  .recv = qca_ibs_wake_ind  },
 	{ QCA_IBS_WAKE_ACK_EVENT,  .recv = qca_ibs_wake_ack  },
 	{ QCA_IBS_SLEEP_IND_EVENT, .recv = qca_ibs_sleep_ind },
@@ -1276,7 +1279,7 @@ static int qca_recv(struct hci_uart *hu, const void *data, int count)
 	if (!test_bit(HCI_UART_REGISTERED, &hu->flags))
 		return -EUNATCH;
 
-	qca->rx_skb = h4_recv_buf(hu->hdev, qca->rx_skb, data, count,
+	qca->rx_skb = h4_recv_buf(hu, qca->rx_skb, data, count,
 				  qca_recv_pkts, ARRAY_SIZE(qca_recv_pkts));
 	if (IS_ERR(qca->rx_skb)) {
 		int err = PTR_ERR(qca->rx_skb);
@@ -1911,7 +1914,7 @@ static int qca_setup(struct hci_uart *hu)
 	const char *rampatch_name = qca_get_rampatch_name(hu);
 	int ret;
 	struct qca_btsoc_version ver;
-	struct qca_serdev *qcadev;
+	struct qca_serdev *qcadev = serdev_device_get_drvdata(hu->serdev);
 	const char *soc_name;
 
 	ret = qca_check_speeds(hu);
@@ -1975,7 +1978,6 @@ retry:
 	case QCA_WCN6750:
 	case QCA_WCN6855:
 	case QCA_WCN7850:
-		qcadev = serdev_device_get_drvdata(hu->serdev);
 		if (qcadev->bdaddr_property_broken)
 			hci_set_quirk(hdev, HCI_QUIRK_BDADDR_PROPERTY_BROKEN);
 
@@ -2069,7 +2071,7 @@ out:
 	else
 		hu->hdev->set_bdaddr = qca_set_bdaddr;
 
-	if (soc_type == QCA_QCA2066)
+	if (qcadev->support_hfp_hw_offload)
 		qca_configure_hfp_offload(hdev);
 
 	qca->fw_version = le16_to_cpu(ver.patch_ver);
@@ -2153,7 +2155,8 @@ static const struct qca_device_data qca_soc_data_wcn3998 __maybe_unused = {
 static const struct qca_device_data qca_soc_data_qca2066 __maybe_unused = {
 	.soc_type = QCA_QCA2066,
 	.num_vregs = 0,
-	.capabilities = QCA_CAP_WIDEBAND_SPEECH | QCA_CAP_VALID_LE_STATES,
+	.capabilities = QCA_CAP_WIDEBAND_SPEECH | QCA_CAP_VALID_LE_STATES |
+			QCA_CAP_HFP_HW_OFFLOAD,
 };
 
 static const struct qca_device_data qca_soc_data_qca6390 __maybe_unused = {
@@ -2189,7 +2192,8 @@ static const struct qca_device_data qca_soc_data_wcn6855 __maybe_unused = {
 		{ "vddrfa1p2", 257000 },
 	},
 	.num_vregs = 6,
-	.capabilities = QCA_CAP_WIDEBAND_SPEECH | QCA_CAP_VALID_LE_STATES,
+	.capabilities = QCA_CAP_WIDEBAND_SPEECH | QCA_CAP_VALID_LE_STATES |
+			QCA_CAP_HFP_HW_OFFLOAD,
 };
 
 static const struct qca_device_data qca_soc_data_wcn7850 __maybe_unused = {
@@ -2203,7 +2207,8 @@ static const struct qca_device_data qca_soc_data_wcn7850 __maybe_unused = {
 		{ "vddrfa1p9", 302000 },
 	},
 	.num_vregs = 6,
-	.capabilities = QCA_CAP_WIDEBAND_SPEECH | QCA_CAP_VALID_LE_STATES,
+	.capabilities = QCA_CAP_WIDEBAND_SPEECH | QCA_CAP_VALID_LE_STATES |
+			QCA_CAP_HFP_HW_OFFLOAD,
 };
 
 static void qca_power_shutdown(struct hci_uart *hu)
@@ -2538,6 +2543,9 @@ static int qca_serdev_probe(struct serdev_device *serdev)
 
 		if (!(data->capabilities & QCA_CAP_VALID_LE_STATES))
 			hci_set_quirk(hdev, HCI_QUIRK_BROKEN_LE_STATES);
+
+		if (data->capabilities & QCA_CAP_HFP_HW_OFFLOAD)
+			qcadev->support_hfp_hw_offload = true;
 	}
 
 	return 0;
@@ -2566,11 +2574,10 @@ static void qca_serdev_remove(struct serdev_device *serdev)
 	hci_uart_unregister_device(&qcadev->serdev_hu);
 }
 
-static void qca_serdev_shutdown(struct device *dev)
+static void qca_serdev_shutdown(struct serdev_device *serdev)
 {
 	int ret;
 	int timeout = msecs_to_jiffies(CMD_TRANS_TIMEOUT_MS);
-	struct serdev_device *serdev = to_serdev_device(dev);
 	struct qca_serdev *qcadev = serdev_device_get_drvdata(serdev);
 	struct hci_uart *hu = &qcadev->serdev_hu;
 	struct hci_dev *hdev = hu->hdev;
@@ -2792,11 +2799,11 @@ static void hciqca_coredump(struct device *dev)
 static struct serdev_device_driver qca_serdev_driver = {
 	.probe = qca_serdev_probe,
 	.remove = qca_serdev_remove,
+	.shutdown = qca_serdev_shutdown,
 	.driver = {
 		.name = "hci_uart_qca",
 		.of_match_table = of_match_ptr(qca_bluetooth_of_match),
 		.acpi_match_table = ACPI_PTR(qca_bluetooth_acpi_match),
-		.shutdown = qca_serdev_shutdown,
 		.pm = &qca_pm_ops,
 #ifdef CONFIG_DEV_COREDUMP
 		.coredump = hciqca_coredump,

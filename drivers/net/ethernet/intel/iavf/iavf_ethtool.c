@@ -1276,7 +1276,7 @@ static int iavf_add_fdir_ethtool(struct iavf_adapter *adapter, struct ethtool_rx
 	}
 	spin_unlock_bh(&adapter->fdir_fltr_lock);
 
-	fltr = kzalloc(sizeof(*fltr), GFP_KERNEL);
+	fltr = kzalloc_obj(*fltr);
 	if (!fltr)
 		return -ENOMEM;
 
@@ -1307,14 +1307,7 @@ static int iavf_del_fdir_ethtool(struct iavf_adapter *adapter, struct ethtool_rx
 	return iavf_fdir_del_fltr(adapter, false, fsp->location);
 }
 
-/**
- * iavf_adv_rss_parse_hdrs - parses headers from RSS hash input
- * @cmd: ethtool rxnfc command
- *
- * This function parses the rxnfc command and returns intended
- * header types for RSS configuration
- */
-static u32 iavf_adv_rss_parse_hdrs(struct ethtool_rxnfc *cmd)
+static u32 iavf_adv_rss_parse_hdrs(const struct ethtool_rxfh_fields *cmd)
 {
 	u32 hdrs = IAVF_ADV_RSS_FLOW_SEG_HDR_NONE;
 
@@ -1343,6 +1336,56 @@ static u32 iavf_adv_rss_parse_hdrs(struct ethtool_rxnfc *cmd)
 		hdrs |= IAVF_ADV_RSS_FLOW_SEG_HDR_SCTP |
 			IAVF_ADV_RSS_FLOW_SEG_HDR_IPV6;
 		break;
+	case GTPU_V4_FLOW:
+		hdrs |= IAVF_ADV_RSS_FLOW_SEG_HDR_GTPU_IP |
+			IAVF_ADV_RSS_FLOW_SEG_HDR_IPV4;
+		break;
+	case GTPC_V4_FLOW:
+		hdrs |= IAVF_ADV_RSS_FLOW_SEG_HDR_GTPC |
+			IAVF_ADV_RSS_FLOW_SEG_HDR_UDP |
+			IAVF_ADV_RSS_FLOW_SEG_HDR_IPV4;
+		break;
+	case GTPC_TEID_V4_FLOW:
+		hdrs |= IAVF_ADV_RSS_FLOW_SEG_HDR_GTPC_TEID |
+			IAVF_ADV_RSS_FLOW_SEG_HDR_UDP |
+			IAVF_ADV_RSS_FLOW_SEG_HDR_IPV4;
+		break;
+	case GTPU_EH_V4_FLOW:
+		hdrs |= IAVF_ADV_RSS_FLOW_SEG_HDR_GTPU_EH |
+			IAVF_ADV_RSS_FLOW_SEG_HDR_IPV4;
+		break;
+	case GTPU_UL_V4_FLOW:
+		hdrs |= IAVF_ADV_RSS_FLOW_SEG_HDR_GTPU_UP |
+			IAVF_ADV_RSS_FLOW_SEG_HDR_IPV4;
+		break;
+	case GTPU_DL_V4_FLOW:
+		hdrs |= IAVF_ADV_RSS_FLOW_SEG_HDR_GTPU_DWN |
+			IAVF_ADV_RSS_FLOW_SEG_HDR_IPV4;
+		break;
+	case GTPU_V6_FLOW:
+		hdrs |= IAVF_ADV_RSS_FLOW_SEG_HDR_GTPU_IP |
+			IAVF_ADV_RSS_FLOW_SEG_HDR_IPV6;
+		break;
+	case GTPC_V6_FLOW:
+		hdrs |= IAVF_ADV_RSS_FLOW_SEG_HDR_GTPC |
+			IAVF_ADV_RSS_FLOW_SEG_HDR_IPV6;
+		break;
+	case GTPC_TEID_V6_FLOW:
+		hdrs |= IAVF_ADV_RSS_FLOW_SEG_HDR_GTPC_TEID |
+			IAVF_ADV_RSS_FLOW_SEG_HDR_IPV6;
+		break;
+	case GTPU_EH_V6_FLOW:
+		hdrs |= IAVF_ADV_RSS_FLOW_SEG_HDR_GTPU_EH |
+			IAVF_ADV_RSS_FLOW_SEG_HDR_IPV6;
+		break;
+	case GTPU_UL_V6_FLOW:
+		hdrs |= IAVF_ADV_RSS_FLOW_SEG_HDR_GTPU_UP |
+			IAVF_ADV_RSS_FLOW_SEG_HDR_IPV6;
+		break;
+	case GTPU_DL_V6_FLOW:
+		hdrs |= IAVF_ADV_RSS_FLOW_SEG_HDR_GTPU_DWN |
+			IAVF_ADV_RSS_FLOW_SEG_HDR_IPV6;
+		break;
 	default:
 		break;
 	}
@@ -1350,15 +1393,8 @@ static u32 iavf_adv_rss_parse_hdrs(struct ethtool_rxnfc *cmd)
 	return hdrs;
 }
 
-/**
- * iavf_adv_rss_parse_hash_flds - parses hash fields from RSS hash input
- * @cmd: ethtool rxnfc command
- * @symm: true if Symmetric Topelitz is set
- *
- * This function parses the rxnfc command and returns intended hash fields for
- * RSS configuration
- */
-static u64 iavf_adv_rss_parse_hash_flds(struct ethtool_rxnfc *cmd, bool symm)
+static u64
+iavf_adv_rss_parse_hash_flds(const struct ethtool_rxfh_fields *cmd, bool symm)
 {
 	u64 hfld = IAVF_ADV_RSS_HASH_INVALID;
 
@@ -1367,6 +1403,12 @@ static u64 iavf_adv_rss_parse_hash_flds(struct ethtool_rxnfc *cmd, bool symm)
 		case TCP_V4_FLOW:
 		case UDP_V4_FLOW:
 		case SCTP_V4_FLOW:
+		case GTPU_V4_FLOW:
+		case GTPC_V4_FLOW:
+		case GTPC_TEID_V4_FLOW:
+		case GTPU_EH_V4_FLOW:
+		case GTPU_UL_V4_FLOW:
+		case GTPU_DL_V4_FLOW:
 			if (cmd->data & RXH_IP_SRC)
 				hfld |= IAVF_ADV_RSS_HASH_FLD_IPV4_SA;
 			if (cmd->data & RXH_IP_DST)
@@ -1375,6 +1417,12 @@ static u64 iavf_adv_rss_parse_hash_flds(struct ethtool_rxnfc *cmd, bool symm)
 		case TCP_V6_FLOW:
 		case UDP_V6_FLOW:
 		case SCTP_V6_FLOW:
+		case GTPU_V6_FLOW:
+		case GTPC_V6_FLOW:
+		case GTPC_TEID_V6_FLOW:
+		case GTPU_EH_V6_FLOW:
+		case GTPU_UL_V6_FLOW:
+		case GTPU_DL_V6_FLOW:
 			if (cmd->data & RXH_IP_SRC)
 				hfld |= IAVF_ADV_RSS_HASH_FLD_IPV6_SA;
 			if (cmd->data & RXH_IP_DST)
@@ -1396,6 +1444,7 @@ static u64 iavf_adv_rss_parse_hash_flds(struct ethtool_rxnfc *cmd, bool symm)
 			break;
 		case UDP_V4_FLOW:
 		case UDP_V6_FLOW:
+		case GTPC_V4_FLOW:
 			if (cmd->data & RXH_L4_B_0_1)
 				hfld |= IAVF_ADV_RSS_HASH_FLD_UDP_SRC_PORT;
 			if (cmd->data & RXH_L4_B_2_3)
@@ -1412,21 +1461,42 @@ static u64 iavf_adv_rss_parse_hash_flds(struct ethtool_rxnfc *cmd, bool symm)
 			break;
 		}
 	}
+	if (cmd->data & RXH_GTP_TEID) {
+		switch (cmd->flow_type) {
+		case GTPC_TEID_V4_FLOW:
+		case GTPC_TEID_V6_FLOW:
+			hfld |= IAVF_ADV_RSS_HASH_FLD_GTPC_TEID;
+			break;
+		case GTPU_V4_FLOW:
+		case GTPU_V6_FLOW:
+			hfld |= IAVF_ADV_RSS_HASH_FLD_GTPU_IP_TEID;
+			break;
+		case GTPU_EH_V4_FLOW:
+		case GTPU_EH_V6_FLOW:
+			hfld |= IAVF_ADV_RSS_HASH_FLD_GTPU_EH_TEID;
+			break;
+		case GTPU_UL_V4_FLOW:
+		case GTPU_UL_V6_FLOW:
+			hfld |= IAVF_ADV_RSS_HASH_FLD_GTPU_UP_TEID;
+			break;
+		case GTPU_DL_V4_FLOW:
+		case GTPU_DL_V6_FLOW:
+			hfld |= IAVF_ADV_RSS_HASH_FLD_GTPU_DWN_TEID;
+			break;
+		default:
+			break;
+		}
+	}
 
 	return hfld;
 }
 
-/**
- * iavf_set_adv_rss_hash_opt - Enable/Disable flow types for RSS hash
- * @adapter: pointer to the VF adapter structure
- * @cmd: ethtool rxnfc command
- *
- * Returns Success if the flow input set is supported.
- */
 static int
-iavf_set_adv_rss_hash_opt(struct iavf_adapter *adapter,
-			  struct ethtool_rxnfc *cmd)
+iavf_set_rxfh_fields(struct net_device *netdev,
+		     const struct ethtool_rxfh_fields *cmd,
+		     struct netlink_ext_ack *extack)
 {
+	struct iavf_adapter *adapter = netdev_priv(netdev);
 	struct iavf_adv_rss *rss_old, *rss_new;
 	bool rss_new_add = false;
 	bool symm = false;
@@ -1449,7 +1519,7 @@ iavf_set_adv_rss_hash_opt(struct iavf_adapter *adapter,
 	if (hash_flds == IAVF_ADV_RSS_HASH_INVALID)
 		return -EINVAL;
 
-	rss_new = kzalloc(sizeof(*rss_new), GFP_KERNEL);
+	rss_new = kzalloc_obj(*rss_new);
 	if (!rss_new)
 		return -ENOMEM;
 
@@ -1493,17 +1563,10 @@ iavf_set_adv_rss_hash_opt(struct iavf_adapter *adapter,
 	return err;
 }
 
-/**
- * iavf_get_adv_rss_hash_opt - Retrieve hash fields for a given flow-type
- * @adapter: pointer to the VF adapter structure
- * @cmd: ethtool rxnfc command
- *
- * Returns Success if the flow input set is supported.
- */
 static int
-iavf_get_adv_rss_hash_opt(struct iavf_adapter *adapter,
-			  struct ethtool_rxnfc *cmd)
+iavf_get_rxfh_fields(struct net_device *netdev, struct ethtool_rxfh_fields *cmd)
 {
+	struct iavf_adapter *adapter = netdev_priv(netdev);
 	struct iavf_adv_rss *rss;
 	u64 hash_flds;
 	u32 hdrs;
@@ -1568,14 +1631,24 @@ static int iavf_set_rxnfc(struct net_device *netdev, struct ethtool_rxnfc *cmd)
 	case ETHTOOL_SRXCLSRLDEL:
 		ret = iavf_del_fdir_ethtool(adapter, cmd);
 		break;
-	case ETHTOOL_SRXFH:
-		ret = iavf_set_adv_rss_hash_opt(adapter, cmd);
-		break;
 	default:
 		break;
 	}
 
 	return ret;
+}
+
+/**
+ * iavf_get_rx_ring_count - get RX ring count
+ * @netdev: network interface device structure
+ *
+ * Return: number of RX rings.
+ **/
+static u32 iavf_get_rx_ring_count(struct net_device *netdev)
+{
+	struct iavf_adapter *adapter = netdev_priv(netdev);
+
+	return adapter->num_active_queues;
 }
 
 /**
@@ -1593,10 +1666,6 @@ static int iavf_get_rxnfc(struct net_device *netdev, struct ethtool_rxnfc *cmd,
 	int ret = -EOPNOTSUPP;
 
 	switch (cmd->cmd) {
-	case ETHTOOL_GRXRINGS:
-		cmd->data = adapter->num_active_queues;
-		ret = 0;
-		break;
 	case ETHTOOL_GRXCLSRLCNT:
 		if (!(adapter->flags & IAVF_FLAG_FDIR_ENABLED))
 			break;
@@ -1611,9 +1680,6 @@ static int iavf_get_rxnfc(struct net_device *netdev, struct ethtool_rxnfc *cmd,
 		break;
 	case ETHTOOL_GRXCLSRLALL:
 		ret = iavf_get_fdir_fltr_ids(adapter, cmd, (u32 *)rule_locs);
-		break;
-	case ETHTOOL_GRXFH:
-		ret = iavf_get_adv_rss_hash_opt(adapter, cmd);
 		break;
 	default:
 		break;
@@ -1809,9 +1875,12 @@ static const struct ethtool_ops iavf_ethtool_ops = {
 	.set_per_queue_coalesce = iavf_set_per_queue_coalesce,
 	.set_rxnfc		= iavf_set_rxnfc,
 	.get_rxnfc		= iavf_get_rxnfc,
+	.get_rx_ring_count	= iavf_get_rx_ring_count,
 	.get_rxfh_indir_size	= iavf_get_rxfh_indir_size,
 	.get_rxfh		= iavf_get_rxfh,
 	.set_rxfh		= iavf_set_rxfh,
+	.get_rxfh_fields	= iavf_get_rxfh_fields,
+	.set_rxfh_fields	= iavf_set_rxfh_fields,
 	.get_channels		= iavf_get_channels,
 	.set_channels		= iavf_set_channels,
 	.get_rxfh_key_size	= iavf_get_rxfh_key_size,
